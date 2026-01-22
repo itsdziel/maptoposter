@@ -92,14 +92,9 @@ def health():
 JOB_LOCK = threading.Semaphore(1)
 
 def _run_generate(job_id: str, req: GenerateRequest, key: str) -> None:
-    """
-    Background job: generate poster using the existing CLI script,
-    then store into cache and mark job as DONE.
-    """
-    # Ensure only 1 generation runs at a time (Render free)
+    # Pastikan hanya 1 job berat jalan di free tier
     acquired = JOB_LOCK.acquire(timeout=1)
     if not acquired:
-        # If another job is running, retry a bit later
         time.sleep(1)
 
     try:
@@ -111,7 +106,6 @@ def _run_generate(job_id: str, req: GenerateRequest, key: str) -> None:
             "message": "Generating..."
         })
 
-        # If already cached while waiting, finish fast
         cached = cache_png_path(key)
         if os.path.exists(cached):
             write_job(job_id, {
@@ -135,55 +129,61 @@ def _run_generate(job_id: str, req: GenerateRequest, key: str) -> None:
             "--distance", str(int(req.distance)),
         ]
 
-        # Give it time; this is background so no gateway timeout problem.
-        # Still keep a cap to avoid hanging forever.
-       res = subprocess.run(cmd, capture_output=True, text=True, timeout=240)
+        # Coba generate utama
+        res = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=240
+        )
 
-# Jika gagal, coba sekali lagi dengan distance lebih kecil (fallback)
-if res.returncode != 0:
-    # fallback hanya kalau distance > 2000
-    if int(req.distance) > 2000:
-        cmd2 = cmd.copy()
-        # ganti parameter distance terakhir
-        cmd2[-1] = "2000"
-        res2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=240)
-        if res2.returncode == 0:
-            res = res2
-        else:
-            msg = (res2.stderr or res2.stdout or "Generation failed").strip()
-            write_job(job_id, {
-                "job_id": job_id,
-                "status": "ERROR",
-                "created_at": time.time(),
-                "cache_key": key,
-                "message": ("Fallback failed: " + msg)[:2000]
-            })
-            return
-    else:
-        msg = (res.stderr or res.stdout or "Generation failed").strip()
-        write_job(job_id, {
-            "job_id": job_id,
-            "status": "ERROR",
-            "created_at": time.time(),
-            "cache_key": key,
-            "message": msg[:2000]
-        })
-        return
+        # Kalau gagal, coba fallback distance lebih kecil
+        if res.returncode != 0:
+            if int(req.distance) > 2000:
+                cmd_fallback = cmd.copy()
+                cmd_fallback[-1] = "2000"
 
+                res2 = subprocess.run(
+                    cmd_fallback,
+                    capture_output=True,
+                    text=True,
+                    timeout=240
+                )
 
-        time.sleep(0.3)
+                if res2.returncode != 0:
+                    msg = (res2.stderr or res2.stdout or "Generation failed").strip()
+                    write_job(job_id, {
+                        "job_id": job_id,
+                        "status": "ERROR",
+                        "created_at": time.time(),
+                        "cache_key": key,
+                        "message": msg[:2000]
+                    })
+                    return
+            else:
+                msg = (res.stderr or res.stdout or "Generation failed").strip()
+                write_job(job_id, {
+                    "job_id": job_id,
+                    "status": "ERROR",
+                    "created_at": time.time(),
+                    "cache_key": key,
+                    "message": msg[:2000]
+                })
+                return
+
+        time.sleep(0.5)
         after = newest_png_in_posters()
+
         if not after or after == before:
             write_job(job_id, {
                 "job_id": job_id,
                 "status": "ERROR",
                 "created_at": time.time(),
                 "cache_key": key,
-                "message": "Poster not found in posters/ after generation."
+                "message": "Poster not found after generation."
             })
             return
 
-        # Move result into cache
         os.replace(after, cached)
 
         write_job(job_id, {
@@ -201,8 +201,9 @@ if res.returncode != 0:
             "status": "ERROR",
             "created_at": time.time(),
             "cache_key": key,
-            "message": "Generation exceeded 300s timeout."
+            "message": "Generation timed out."
         })
+
     except Exception as e:
         write_job(job_id, {
             "job_id": job_id,
@@ -211,11 +212,13 @@ if res.returncode != 0:
             "cache_key": key,
             "message": f"Unexpected error: {str(e)}"
         })
+
     finally:
         try:
             JOB_LOCK.release()
         except Exception:
             pass
+
 
 @app.post("/generate_async")
 def generate_async(req: GenerateRequest):
