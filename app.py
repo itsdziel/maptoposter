@@ -67,7 +67,7 @@ class GenerateRequest(BaseModel):
     country: str = Field(..., min_length=1, max_length=80)
     theme: str = Field(..., min_length=1, max_length=80)
     # Render free: keep this small to reduce failures
-    distance: int = Field(3000, ge=1000, le=8000)
+    distance: int = Field(2000, ge=1000, le=4000)
 
 app = FastAPI(title="MapToPoster API (Async)")
 
