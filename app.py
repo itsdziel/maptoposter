@@ -137,18 +137,39 @@ def _run_generate(job_id: str, req: GenerateRequest, key: str) -> None:
 
         # Give it time; this is background so no gateway timeout problem.
         # Still keep a cap to avoid hanging forever.
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+       res = subprocess.run(cmd, capture_output=True, text=True, timeout=240)
 
-        if res.returncode != 0:
-            msg = (res.stderr or res.stdout or "Generation failed").strip()
+# Jika gagal, coba sekali lagi dengan distance lebih kecil (fallback)
+if res.returncode != 0:
+    # fallback hanya kalau distance > 2000
+    if int(req.distance) > 2000:
+        cmd2 = cmd.copy()
+        # ganti parameter distance terakhir
+        cmd2[-1] = "2000"
+        res2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=240)
+        if res2.returncode == 0:
+            res = res2
+        else:
+            msg = (res2.stderr or res2.stdout or "Generation failed").strip()
             write_job(job_id, {
                 "job_id": job_id,
                 "status": "ERROR",
                 "created_at": time.time(),
                 "cache_key": key,
-                "message": msg[:2000]
+                "message": ("Fallback failed: " + msg)[:2000]
             })
             return
+    else:
+        msg = (res.stderr or res.stdout or "Generation failed").strip()
+        write_job(job_id, {
+            "job_id": job_id,
+            "status": "ERROR",
+            "created_at": time.time(),
+            "cache_key": key,
+            "message": msg[:2000]
+        })
+        return
+
 
         time.sleep(0.3)
         after = newest_png_in_posters()
