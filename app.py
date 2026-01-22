@@ -19,7 +19,7 @@ class GenerateRequest(BaseModel):
     city: str = Field(..., min_length=1, max_length=80)
     country: str = Field(..., min_length=1, max_length=80)
     theme: str = Field(..., min_length=1, max_length=80)
-    distance: int = Field(29000, ge=1000, le=100000)
+    distance: int = Field(8000, ge=1000, le=20000)
 
 app = FastAPI(title="MapToPoster API")
 
@@ -63,7 +63,7 @@ def generate(req: GenerateRequest):
     ]
 
     try:
-        subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=120)
+        subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=80)
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="Generation timeout.")
     except subprocess.CalledProcessError as e:
